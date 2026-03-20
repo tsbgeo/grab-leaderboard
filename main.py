@@ -1,16 +1,16 @@
 import requests
 import math
+import json
 from collections import defaultdict
 
 LEVEL_LIST_URL = "https://api.slin.dev/grab/v1/list?max_format_version=20&type=curated_challenge"
 BASE_STATS_URL = "https://api.slin.dev/grab/v1/statistics"
 
-# ---------- MMR LOGIC ----------
+# ---------- MMR SYSTEM ----------
 
-def level_mmr(victors, age_days):
-    age_factor = math.log(age_days + 1) * 500
-    victor_factor = 8000 / (victors + 1)
-    return age_factor + victor_factor
+def level_mmr(victors):
+    # smoother scaling
+    return 5000 / math.sqrt(victors + 1)
 
 def placement_multiplier(rank):
     if rank == 1:
@@ -44,11 +44,16 @@ def get_rank(mmr):
     else:
         return "Elite"
 
-# ---------- MAIN LOGIC ----------
+# ---------- MAIN ----------
 
 def main():
-    print("Fetching level list...")
-    levels_data = requests.get(LEVEL_LIST_URL).json()
+    print("Fetching levels...")
+
+    try:
+        levels_data = requests.get(LEVEL_LIST_URL).json()
+    except:
+        print("Failed to fetch level list")
+        return
 
     player_scores = defaultdict(float)
 
@@ -60,28 +65,34 @@ def main():
 
         print(f"Processing level {level_id}")
 
-        # Get leaderboard
+        # Try to fetch leaderboard
         try:
             url = f"{BASE_STATS_URL}/{level_id}/1654257963"
             data = requests.get(url).json()
         except:
             continue
 
-        victors = len(data.get("scores", []))
-        age_days = 365  # fallback if not provided
-
-        base_mmr = level_mmr(victors, age_days)
-
         scores = data.get("scores", [])
 
-        for i, entry in enumerate(scores):
-            player = entry.get("player", "unknown")
-            rank = i + 1
+        if not scores:
+            continue
 
+        victors = len(scores)
+
+        base_mmr = level_mmr(victors)
+
+        for i, entry in enumerate(scores):
+            player = entry.get("player")
+
+            if not player:
+                continue
+
+            rank = i + 1
             mmr_gain = base_mmr * placement_multiplier(rank)
+
             player_scores[player] += mmr_gain
 
-    # Convert to final leaderboard
+    # Build leaderboard
     leaderboard = []
 
     for player, mmr in player_scores.items():
@@ -93,12 +104,10 @@ def main():
 
     leaderboard.sort(key=lambda x: x["mmr"], reverse=True)
 
-    # Save file
     with open("leaderboard.json", "w") as f:
-        import json
         json.dump(leaderboard, f, indent=2)
 
-    print("Leaderboard updated!")
+    print("Leaderboard updated successfully!")
 
 if __name__ == "__main__":
     main()
